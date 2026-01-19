@@ -1,0 +1,269 @@
+# notebook 4- 1- daily refresh
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+from datetime import datetime
+
+import pandas as pd
+
+
+# -------------------------------
+# Core pipeline modules
+# -------------------------------
+from core.n1_1_cleaning import (
+    clean_campaign_name,
+    extract_objective_dynamic,
+    normalize_objective,
+)
+
+from core.n2_1_supermetrics_ingestion import load_supermetrics_export
+from core.n2_2_meta_ingestion import fetch_meta_daily_fact_table
+from core.n2_3_merge import build_canonical_daily_df
+
+from core.n3_1_aggregation import aggregate_daily_campaign
+from core.n3_2_features import build_ctr_features
+from core.n3_3_model import load_model, predict_ctr
+from core.n3_4_rules import generate_signals
+
+# ===================================================
+# CONFIG
+# ===================================================
+DEFAULT_MODEL_PATH = Path("artifacts/models/ctr_link")
+DEFAULT_MIN_HISTORY_DAYS = 7
+
+OUTPUT_DIR = Path("data/predictions")
+OUTPUT_CANONICAL = OUTPUT_DIR / "canonical_daily.parquet"
+OUTPUT_FEATURES = OUTPUT_DIR / "features.parquet"
+OUTPUT_PREDICTIONS = OUTPUT_DIR / "predictions.parquet"
+OUTPUT_ALERTS = OUTPUT_DIR / "alerts.parquet"
+
+# ===================================================
+# ENV HELPERS
+# ===================================================
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+# ===================================================
+# DAILY REFRESH PIPELINE
+# ===================================================
+def run_daily_refresh(
+        *,
+        supermetrics_path: Path,
+        access_token: str,
+        ad_acount_id: str,
+        date_since: str,
+        date_until: str,
+        model_path: str,
+        min_history_days: int,
+) -> None:
+    """
+    Daily Prediction + recommendation pipeline.
+
+    Flow: 
+    Supermetrics
+    Meta API
+    -> cleaning
+    -> aggregation
+    -> feature engineering
+    -> load trained model
+    -> predict CTR
+    -> apply rules
+    -> write outputs
+    """
+
+    print("\n==============================")
+    print("🔄 DAILY REFRESH PIPELINE START")
+    print("==============================")
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    run_date = datetime.utcnow().strftime("%Y-%m-%d")
+
+    # -------------------------------------------------
+    # 0. INGEST — Supermetrics (authoritative metrics)
+    # -------------------------------------------------
+    print("[0/8] Loading Supermetrics export...")
+    df_super = load_supermetrics_export(supermetrics_path)
+
+    if df_super.empty:
+        raise RuntimeError("Supermetrics export is empty.")
+    
+    # -------------------------------------------------
+    # 1. INGEST Latest Data (Meta Graph API)
+    # -------------------------------------------------
+    print("[1/8] Fetching latest Meta data...")
+    df_raw = fetch_meta_daily_fact_table(
+        access_token=access_token,
+        ad_account_id=ad_acount_id,
+        date_since=date_since,
+        date_until=date_until,
+    )
+
+    if df_raw.empty:
+        raise RuntimeError("No data returned from Meta API.")
+
+    # ----------------------------------------------
+    # 1.5 Merge - Single Source of Truth
+    # ----------------------------------------------
+    print("[1.5/8] Merging Supermetrics + Meta...")
+    df = build_canonical_daily_df(
+        supermetrics_df=df_super,
+        meta_df=df_raw,
+    )
+
+    if df.empty:
+        raise RuntimeError("Merged canonical DataFrame is empty.")
+    
+    df.to_parquet(OUTPUT_CANONICAL, index=False)
+
+    # -------------------------------------------------
+    # 2. CLEANING / ONTOLOGY
+    # -------------------------------------------------
+    print("[2/8] Cleaning campaign semantics...")
+
+    if "campaign_name" in df.columns:
+        df["campaign_name_clean"] = df["campaign_name"].apply(
+            clean_campaign_name
+        )
+        df["objective_raw"] = df["campaign_name_clean"].apply(
+            extract_objective_dynamic
+        )
+        df["objective"] = df["objective_raw"].apply(normalize_objective)
+
+    # -------------------------------------------------
+    # 3. AGGREGATION
+    # -------------------------------------------------
+    print("[3/6] Aggregating daily campaign data...")
+    df_daily = aggregate_daily_campaign(df)
+
+    if df_daily.empty:
+        raise RuntimeError("Aggregation resulted in empty DataFrame.")
+    
+    # -------------------------------------------------
+    # 4. FEATURE ENGINEERING
+    # -------------------------------------------------
+    print("[4/8] Building CTR features...")
+    df_features = build_ctr_features(df_daily, min_history_days=min_history_days)
+
+    if df_features.empty:
+        raise RuntimeError("Feature engineering resulted in empty DataFrame.")
+    
+    df_features.to_parquet(OUTPUT_FEATURES, index=False)
+    
+    # ----------------------------------------------------
+    # 5. LOAD TRAINED MODEL
+    # ----------------------------------------------------
+    print("[5/8] Loading trained model...")
+    model, metadata = load_model(model_path)
+
+    # -----------------------------------------------------
+    # 6. PREDICT CTR
+    # -----------------------------------------------------
+    print("[6/8] Predicting CTR...")
+    df_features["pred_ctr_link"] = predict_ctr(
+        model,
+        df_features,
+        feature_cols=metadata["features"],
+    )
+
+    # -------------------------------------------------------
+    # 7. APPLY RULES
+    # -------------------------------------------------------
+    print("[7/8] Generating recommendations...")
+    df_out = generate_signals(df_features)
+
+    # -------------------------------------------------------
+    # 8. WRITE OUTPUTS
+    # -------------------------------------------------------
+    print(["8/8] Writing outputs..."])
+
+    # Full predictions
+    # full_path = OUTPUT_DIR / "daily_predictions_latest.csv"
+    # df_out.to_csv(full_path, index=False)
+
+    # # Alerts-only view
+    # alerts = df_out[df_out["alert_msg"] != ""]
+    # alerts_path = OUTPUT_DIR / "daily_alerts_latest.csv"
+    # alerts.to_csv(alerts_path, index=False)
+
+    df_out.to_parquet(OUTPUT_PREDICTIONS, index=False)
+
+    alerts = df_out[df_out["alert_msg"].notna() & (df_out["alert_msg"] != "")]
+    alerts.to_parquet(OUTPUT_ALERTS, index=False)
+
+    print("\n==============================")
+    print("✅ DAILY REFRESH COMPLETE")
+    print("==============================")
+    print(f"Run date    -> {run_date}")
+    print(f"Predictions -> {OUTPUT_PREDICTIONS.resolve()}")
+    print(f"Alerts      -> {OUTPUT_ALERTS.resolve()}")
+    print(f"Rows        -> {len(df_out)}")
+    # print(f"Run date    -> {run_date}")
+
+# =====================================================
+# CLI Entrypoint
+# =====================================================
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Daily CTR Prediction Pipeline")
+
+    parser.add_argument(
+        "--supermetrics-path",
+        type=Path,
+        required=True,
+        help="Path to Supermetrics export CSV",
+    )
+    
+    #parser.add_argument("--access-token", required=True, help="Meta API access token")
+    #parser.add_argument("--ad-account-id", required=True, help="Meta Ad Account ID")
+    #parser.add_argument("--date-since", required=True, help="Start date (YYYY-MM-DD)")
+    #parser.add_argument("--date-until", required=True, help="End date (YYYY-MM-DD)")
+
+    parser.add_argument(
+        "--date-since",
+        default=os.getenv("DATE_SINCE"),
+        help="Start date (YYYY-MM-DD). CLI > ENV.",
+    )
+
+    parser.add_argument(
+        "--date-until",
+        default=os.getenv("DATE_UNTIL", datetime.today().strftime("%Y-%m-%d")),
+        help="End date (YYYY-MM-DD). Defaults to today.",
+    )
+    
+    parser.add_argument(
+        "--model-path",
+        #default=DEFAULT_MODEL_PATH,
+        type=Path,
+        help="Path prefix of trained model artifacts",
+    )
+
+    parser.add_argument(
+        "--min-history-days",
+        type=int,
+        default=DEFAULT_MIN_HISTORY_DAYS,
+    )
+
+    args = parser.parse_args()
+
+    if not args.date_since:
+        raise RuntimeError("date-since must be provided via CLI or DATE_SINCE env var")
+    
+    # Secrets
+    access_token = require_env("META_ACCESS_TOKEN")
+    ad_account_id = require_env("META_AD_ACCOUNT_ID")
+
+    run_daily_refresh(
+        supermetrics_path=args.supermetrics_path,
+        access_token=args.access_token,
+        ad_account_id=args.ad_account_id,
+        date_since=args.date_since,
+        date_until=args.date_until,
+        model_path=args.model_path,
+        min_history_days=args.min_history_days,
+    )
