@@ -58,23 +58,28 @@ def train_ctr_model(
         #"results_type", # text column
     }
 
-    candidate_features = [
+    # ---------------------------------------------
+    # 3. Select numeric-only features
+    # ---------------------------------------------
+    feature_cols: List[str] = [
+    #candidate_features = [
         c for c in df.columns
         if c not in non_feature_cols
+        and pd.api.types.is_numeric_dtype(df[c])
 
     ]
 
-    # Keep numeric only
-    feature_cols = [
-        c for c in df.columns
-        if c not in non_feature_cols
-    ]
+    # # Keep numeric only
+    # feature_cols = [
+    #     c for c in df.columns
+    #     if c not in non_feature_cols
+    # ]
 
     if not feature_cols:
         raise ValueError("No numeric features available for training.")
     
     # ---------------------------------------------
-    # 3. Time-aware train/test split
+    # 4. Time-aware train/test split
     # ---------------------------------------------
     max_date = df["date"].max()
     cutoff_date = max_date - pd.Timedelta(days=test_days)
@@ -160,9 +165,13 @@ def train_ctr_model(
     """
     Should print output here, so i know it's working.
     """
+    print("\n==============================")
+    print("📊 MODEL EVALUATION")
+    print("==============================")
     print(f"XGBoost MAE : {mae:.6f}")
     print(f"XGBoost RMSE: {rmse:.6f}")
     print(f"XGBoost R²  : {r2:.6f}")
+    print("==============================")
 
     print("\nStep 10.4 — Evaluation complete.")
 
@@ -173,7 +182,7 @@ def train_ctr_model(
     # -------------------------------------------
     # 8. Metadata
     # -------------------------------------------
-    metadata = {
+    metadata: Dict[str, Any] = {
         "target": target,
         "features": feature_cols,
         "train_rows": int(len(X_train)),
@@ -221,9 +230,20 @@ def load_model(path: str) -> Tuple[xgb.XGBRegressor, Dict[str, Any]]:
     """
     path = Path(path)
 
-    model = joblib.load(path.with_suffix(".joblib"))
+    #model_path = joblib.load(path.with_suffix(".joblib"))
+    model_path = path.with_suffix(".joblib")
+    meta_path = path.with_suffix(".json")
 
-    with open(path.with_suffix(".json"), "r") as f:
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+    
+    if not meta_path.exists():
+        raise FileNotFoundError(f"Metadata file not found: {meta_path}")
+    
+    model = joblib.load(model_path)
+
+    #with open(path.with_suffix(".json"), "r") as f:
+    with open(meta_path, "r") as f:
         metadata = json.load(f)
 
     return model, metadata

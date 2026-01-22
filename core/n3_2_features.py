@@ -79,10 +79,13 @@ def build_ctr_features(
     for col, windows in ROLLING_FEATURES.items():
         if col in df.columns:
             for w in windows:
+
+                min_p = max(3, w // 2)
+
                 df[f"{col}_roll_{w}"] = (
                     df.groupby("campaign_id")[col]
                     .shift(1)
-                    .rolling(w, min_periods=(3, w // 2))
+                    .rolling(w, min_periods=min_p)
                     .mean()
                 )
     
