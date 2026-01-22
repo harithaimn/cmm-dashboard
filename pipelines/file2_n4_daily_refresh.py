@@ -6,9 +6,9 @@ import argparse
 import os
 from pathlib import Path
 from datetime import datetime
+from tqdm import tqdm
 
 import pandas as pd
-
 
 # -------------------------------
 # Core pipeline modules
@@ -40,6 +40,8 @@ OUTPUT_FEATURES = OUTPUT_DIR / "features.parquet"
 OUTPUT_PREDICTIONS = OUTPUT_DIR / "predictions.parquet"
 OUTPUT_ALERTS = OUTPUT_DIR / "alerts.parquet"
 
+META_CHECKPOINT = Path("data/raw/meta.parquet")
+
 # ===================================================
 # ENV HELPERS
 # ===================================================
@@ -56,7 +58,7 @@ def run_daily_refresh(
         *,
         supermetrics_path: Path,
         access_token: str,
-        ad_acount_id: str,
+        ad_account_id: str,
         date_since: str,
         date_until: str,
         model_path: str,
@@ -85,6 +87,9 @@ def run_daily_refresh(
 
     run_date = datetime.utcnow().strftime("%Y-%m-%d")
 
+    total_steps = 8
+    pbar = tqdm(total=total_steps, desc="Pipeline", unit="step")
+
     # -------------------------------------------------
     # 0. INGEST — Supermetrics (authoritative metrics)
     # -------------------------------------------------
@@ -93,57 +98,89 @@ def run_daily_refresh(
 
     if df_super.empty:
         raise RuntimeError("Supermetrics export is empty.")
+    pbar.update(1)
     
     # -------------------------------------------------
     # 1. INGEST Latest Data (Meta Graph API)
     # -------------------------------------------------
-    print("[1/8] Fetching latest Meta data...")
-    df_raw = fetch_meta_daily_fact_table(
-        access_token=access_token,
-        ad_account_id=ad_acount_id,
-        date_since=date_since,
-        date_until=date_until,
-    )
+    # print("[1/8] Fetching latest Meta data...")
+    # df_raw = fetch_meta_daily_fact_table(
+    #     access_token=access_token,
+    #     ad_account_id=ad_account_id,
+    #     date_since=date_since,
+    #     date_until=date_until,
+    # )
 
-    if df_raw.empty:
-        raise RuntimeError("No data returned from Meta API.")
+    # if df_raw.empty:
+    #     raise RuntimeError("No data returned from Meta API.")
+    # pbar.update(1)
 
+    """ from here, i commented out since i tested using supermetrics only for now. i'll come back later to fix meta pipeline and merging."""
+# """
+#     print("[1/8] Loading Meta data...")
+
+#     if META_CHECKPOINT.exists():
+#         print("↪ Using cached Meta ingestion")
+#         df_raw = pd.read_parquet(META_CHECKPOINT)
+#     else:
+#         print("⬇ Fetching Meta from API")
+#         df_raw = fetch_meta_daily_fact_table(
+#             access_token=access_token,
+#             ad_account_id=ad_account_id,
+#             date_since=date_since,
+#             date_until=date_until,
+#         )
+#         df_raw.to_parquet(META_CHECKPOINT, index=False)
+#         print(f"✅ Meta saved to {META_CHECKPOINT}")
+
+#     if df_raw.empty:
+#             raise RuntimeError("No data returned from Meta API.")
+#     pbar.update(1)
+# """
     # ----------------------------------------------
     # 1.5 Merge - Single Source of Truth
     # ----------------------------------------------
-    print("[1.5/8] Merging Supermetrics + Meta...")
-    df = build_canonical_daily_df(
-        supermetrics_df=df_super,
-        meta_df=df_raw,
-    )
+# """
+#     print("[1.5/8] Merging Supermetrics + Meta...")
+#     df = build_canonical_daily_df(
+#         supermetrics_df=df_super,
+#         meta_df=df_raw,
+#     )
 
-    if df.empty:
-        raise RuntimeError("Merged canonical DataFrame is empty.")
+#     if df.empty:
+#         raise RuntimeError("Merged canonical DataFrame is empty.")
     
-    df.to_parquet(OUTPUT_CANONICAL, index=False)
+#     df.to_parquet(OUTPUT_CANONICAL, index=False)
+#     pbar.update(1)
+# """
+#     # -------------------------------------------------
+#     # 2. CLEANING / ONTOLOGY
+#     # -------------------------------------------------
+# """
+#     print("[2/8] Cleaning campaign semantics...")
 
-    # -------------------------------------------------
-    # 2. CLEANING / ONTOLOGY
-    # -------------------------------------------------
-    print("[2/8] Cleaning campaign semantics...")
+#     if "campaign_name" in df.columns:
+#         df["campaign_name_clean"] = df["campaign_name"].apply(
+#             clean_campaign_name
+#         )
+#         df["objective_raw"] = df["campaign_name_clean"].apply(
+#             extract_objective_dynamic
+#         )
+#         df["objective"] = df["objective_raw"].apply(normalize_objective)
 
-    if "campaign_name" in df.columns:
-        df["campaign_name_clean"] = df["campaign_name"].apply(
-            clean_campaign_name
-        )
-        df["objective_raw"] = df["campaign_name_clean"].apply(
-            extract_objective_dynamic
-        )
-        df["objective"] = df["objective_raw"].apply(normalize_objective)
+#     pbar.update(1)
+# """
 
     # -------------------------------------------------
     # 3. AGGREGATION
     # -------------------------------------------------
-    print("[3/6] Aggregating daily campaign data...")
-    df_daily = aggregate_daily_campaign(df)
+    print("[3/8] Aggregating daily campaign data...")
+    #df_daily = aggregate_daily_campaign(df)
+    df_daily = aggregate_daily_campaign(df_super)
 
     if df_daily.empty:
         raise RuntimeError("Aggregation resulted in empty DataFrame.")
+    pbar.update(1)
     
     # -------------------------------------------------
     # 4. FEATURE ENGINEERING
@@ -155,12 +192,14 @@ def run_daily_refresh(
         raise RuntimeError("Feature engineering resulted in empty DataFrame.")
     
     df_features.to_parquet(OUTPUT_FEATURES, index=False)
+    pbar.update(1)
     
     # ----------------------------------------------------
     # 5. LOAD TRAINED MODEL
     # ----------------------------------------------------
     print("[5/8] Loading trained model...")
     model, metadata = load_model(model_path)
+    pbar.update(1)
 
     # -----------------------------------------------------
     # 6. PREDICT CTR
@@ -196,6 +235,9 @@ def run_daily_refresh(
 
     alerts = df_out[df_out["alert_msg"].notna() & (df_out["alert_msg"] != "")]
     alerts.to_parquet(OUTPUT_ALERTS, index=False)
+
+    pbar.update(1)
+    pbar.close()
 
     print("\n==============================")
     print("✅ DAILY REFRESH COMPLETE")
@@ -260,8 +302,10 @@ if __name__ == "__main__":
 
     run_daily_refresh(
         supermetrics_path=args.supermetrics_path,
-        access_token=args.access_token,
-        ad_account_id=args.ad_account_id,
+        #access_token=args.access_token,
+        #ad_account_id=args.ad_account_id,
+        access_token=access_token,
+        ad_account_id=ad_account_id,
         date_since=args.date_since,
         date_until=args.date_until,
         model_path=args.model_path,

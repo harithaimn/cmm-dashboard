@@ -242,8 +242,10 @@ if __name__ == "__main__":
 
     run_training(
         supermetrics_path=args.supermetrics_path,
-        access_token=args.access_token,
-        ad_account_id=args.ad_account_id,
+        # access_token=args.access_token,
+        # ad_account_id=args.ad_account_id,
+        access_token=access_token,
+        ad_account_id=ad_account_id,
         date_since=args.date_since,
         date_until=args.date_until,
         model_path=args.model_path,

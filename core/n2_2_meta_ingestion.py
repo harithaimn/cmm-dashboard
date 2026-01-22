@@ -5,6 +5,7 @@ from __future__ import annotations
 import requests
 import pandas as pd
 from typing import Dict, List, Any, Optional
+from tqdm import tqdm
 
 # ----------------------------------
 # Internal: Defensive Meta API request layer (retry, no sleep)
@@ -231,7 +232,8 @@ def fetch_meta_daily_fact_table(
     #def get_adsets(access_token: str, campaign_id: str) -> List[Dict[str, Any]]:
     #    adsets = []
 
-    for c in campaigns:    
+    #for c in campaigns:
+    for c in tqdm(campaigns, desc="Campaigns", unit="campaign"):    
         url = (
             f"https://graph.facebook.com/v24.0/{c['id']}/adsets"
             f"?fields=id,name,status,effective_status,daily_budget,lifetime_budget,"
@@ -261,7 +263,8 @@ def fetch_meta_daily_fact_table(
     # ======================================
     ads: List[Dict[str, Any]] = []
 
-    for a in adsets:
+    #for a in adsets:
+    for a in tqdm(adsets, desc="Adsets", unit="adset"):
         url = (
             f"https://graph.facebook.com/v24.0/{a['id']}/ads"
             f"?fields=id,name,status,effective_status,creative{{title}},"
@@ -295,7 +298,8 @@ def fetch_meta_daily_fact_table(
     # ------------------------------------
     rows: List[Dict[str, Any]] = []
 
-    for ad in ads:
+    #for ad in ads:
+    for ad in tqdm(ads, desc="Ads", unit="ad"):
         ad_insights = ad.get("insights", {}).get("data", [])
 
         aset = adset_map.get(ad["adset_id"])
@@ -376,8 +380,3 @@ def fetch_meta_daily_fact_table(
     df["campaign_date_stop"] = pd.to_datetime(df["campaign_date_stop"], errors="coerce")
 
     return df
-
-
-
-
-

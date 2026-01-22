@@ -37,16 +37,33 @@ def build_canonical_daily_df(
     # ----------------------------
     # 3. Assert uniqueness (FAIL FAST)
     # ----------------------------
-    sm_dupes = sm.duplicated(subset=["campaign_id", "date"])
-    if sm_dupes.any():
-        dup = sm.loc[sm_dupes, ["campaign_id", "date"]].head()
+    # sm_dupes = sm.duplicated(subset=["campaign_id", "date"])
+    # if sm_dupes.any():
+    #     dup = sm.loc[sm_dupes, ["campaign_id", "date"]].head()
+    #     raise ValueError(
+    #         f"❌ Supermetrics is not unique on (campaign_id, date).\n{dup}"
+    #     )
+    
+    # meta_dupes = meta.duplicated(subset=["campaign_id", "date"])
+    # if meta_dupes.any():
+    #     dup = meta.loc[meta_dupes, ["campaign_id", "date"]].head()
+    #     raise ValueError(
+    #         f"❌ Meta is not unique on (campaign_id, date).\n{dup}"
+    #     )
+    if sm.duplicated(subset=["campaign_id", "date"]).any():
+        dup = sm.loc[
+            sm.duplicated(subset=["campaign_id", "date"]),
+            ["campaign_id", "date"]
+        ].head()
         raise ValueError(
             f"❌ Supermetrics is not unique on (campaign_id, date).\n{dup}"
         )
-    
-    meta_dupes = meta.duplicated(subset=["campaign_id", "date"])
-    if meta_dupes.any():
-        dup = meta.loc[meta_dupes, ["campaign_id", "date"]].head()
+
+    if meta.duplicated(subset=["campaign_id", "date"]).any():
+        dup = meta.loc[
+            meta.duplicated(subset=["campaign_id", "date"]),
+            ["campaign_id", "date"]
+        ].head()
         raise ValueError(
             f"❌ Meta is not unique on (campaign_id, date).\n{dup}"
         )
@@ -65,11 +82,13 @@ def build_canonical_daily_df(
     # ------------------------------
     # 5. Post-merge sanity checks
     # ------------------------------
-    missing_meta = canonical_df["campaign_result_type"].isna().sum()
+    #missing_meta = canonical_df["campaign_result_type"].isna().sum()
 
-    if missing_meta > 0.2:
+    missing_ratio = canonical_df["campaign_result_type"].isna().mean()
+
+    if missing_ratio > 0.2:
         raise ValueError(
-            f"❌ Too many rows missing Meta enrichment: {missing_meta:.1%}"
+            f"❌ Too many rows missing Meta enrichment: {missing_ratio:.1%}"
         )
     
     return canonical_df

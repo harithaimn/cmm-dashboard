@@ -50,3 +50,14 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 .env
+
+.streamlit/secret.toml
+
+
+# specific files i ignore
+streamlit/backup_streamlit_test.py
+streamlit/streamlit_test.py
+
+Financial Data Clean.xlsx
+Financial Data Clean.xlsx:Zone.Identifier
+parquetconv.py

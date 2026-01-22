@@ -11,7 +11,7 @@ import numpy as np
 
 def aggregate_daily_campaign(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Aggregate row-level Meta Ads data into DAILY × CAMPAIGN grain.
+    Aggregate row-level //Meta Ads data into DAILY × CAMPAIGN grain.
 
     Operations:
     - group by date + campaign_id (+ campaign_name if present)
@@ -49,38 +49,76 @@ def aggregate_daily_campaign(df: pd.DataFrame) -> pd.DataFrame:
     # -----------------------------------
     # 3. Define aggregation rules
     # -----------------------------------
-    agg_dict = {
-        "impressions": "sum",
-        "clicks": "sum",
-        "spend": "sum",
-        #"results_count",
-        #"post_engagements",
-        # "reach",
-        # "post_reactions",
-        # "website_purchases",
-        # "actions",
-    }
+    agg_dict: dict[str, str] = {}
 
-    # mean_cols = [
-    #     "cpa",
-    #     "cpm",
-    #     "cost_per_1000_reach",
-    #     "results_cost",
-    # ]
+    SUM_COLS = [
+        "impressions",
+        "clicks",
+        "clicks_all",
+        "spend",
+        "actions",
+    ]
 
-    # agg_dict: dict[str, str] = {}
+    MEAN_COLS = [
+        "cpa",
+        "cpm",
+        "cost_per_1000_reach",
+    ]
 
-    # for col in sum_cols:
-    #     if col in df.columns:
-    #         agg_dict[col] = "sum"
+    FIRST_COLS = [
+        "campaign_status",
+        "campaign_objective",
+        "campaign_start_date",
+        "campaign_end_date",
+    ]
 
-    # for col in mean_cols:
-    #     if col in df.columns:
-    #         agg_dict[col] = "mean"
+    for col in SUM_COLS:
+        if col in df.columns:
+            agg_dict[col] = "sum"
 
-    # Preserve a representative results type if present
-    if "results_type" in df.columns:
-        agg_dict["results_type"] = "sum"
+    for col in MEAN_COLS:
+        if col in df.columns:
+            agg_dict[col] = "mean"
+
+    for col in FIRST_COLS:
+        if col in df.columns:
+            agg_dict[col] = "first"
+    
+    if not agg_dict:
+        raise ValueError("❌ No aggregatable columns found in input DataFrame.")
+
+    # agg_dict = {
+    #     "impressions": "sum",
+    #     "clicks": "sum",
+    #     "spend": "sum",
+    #     #"results_count",
+    #     #"post_engagements",
+    #     # "reach",
+    #     # "post_reactions",
+    #     # "website_purchases",
+    #     # "actions",
+    # }
+
+    # # mean_cols = [
+    # #     "cpa",
+    # #     "cpm",
+    # #     "cost_per_1000_reach",
+    # #     "results_cost",
+    # # ]
+
+    # # agg_dict: dict[str, str] = {}
+
+    # # for col in sum_cols:
+    # #     if col in df.columns:
+    # #         agg_dict[col] = "sum"
+
+    # # for col in mean_cols:
+    # #     if col in df.columns:
+    # #         agg_dict[col] = "mean"
+
+    # # Preserve a representative results type if present
+    # if "results_type" in df.columns:
+    #     agg_dict["results_type"] = "sum"
 
     # ----------------------------
     # 4. Perform aggregation
@@ -93,12 +131,20 @@ def aggregate_daily_campaign(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # ---------------------------------
-    # 5. Recompute TRUE CTR (correct way)
+    # 5. Recompute TRUE CTR (Source of Truth)
     # ----------------------------------
-    df_agg["ctr_link"] = (
-        df_agg["clicks"] /
-        df_agg["impressions"].replace({0: np.nan})
-    )
+    # df_agg["ctr_link"] = (
+    #     df_agg["clicks"] /
+    #     df_agg["impressions"].replace({0: np.nan})
+    # )
+
+    if {"clicks", "impressions"}.issubset(df_agg.columns):
+        df_agg["ctr_link"] = (
+            df_agg["clicks"] /
+            df_agg["impressions"].replace({0: np.nan})
+        )
+    else:
+        df_agg["ctr_link"] = np.nan
 
     # -----------------------------------------------
     # 6. Recompute additional derived metrics (safe)
