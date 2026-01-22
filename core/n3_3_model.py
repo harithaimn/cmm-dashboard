@@ -257,9 +257,3 @@ def predict_ctr(
     preds = model.predict(X)
     
     return pd.Series(preds, index=df.index, name="pred_ctr_link")
-
-
-
-
-
-

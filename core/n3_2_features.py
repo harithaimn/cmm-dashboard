@@ -46,16 +46,17 @@ def build_ctr_features(
     # ------------------------------------
     # 2. LAG FEATURES
     # ------------------------------------
-    lag_features = {
+    LAG_FEATURES = {
         "ctr_link": [1, 7],
         # "results_count": [1, 7],
         # "results_cost": [1, 7],
-        "result_value": [1, 7],
+        #"result_value": [1, 7],
         "spend": [1, 7],
         "impressions": [1, 7],
+        "clicks": [1, 7],
     }
 
-    for col, lags in lag_features.items():
+    for col, lags in LAG_FEATURES.items():
         if col in df.columns:
             for lag in lags:
                 df[f"{col}_lag_{lag}"] = (
@@ -65,39 +66,42 @@ def build_ctr_features(
     # ------------------------------------
     # 3. ROLLING WINDOW FEATURES
     # ------------------------------------
-    rolling_features = {
+    ROLLING_FEATURES = {
         "ctr_link": [7, 14, 28],
         # "results_count": [7, 14],
         # "results_cost": [7, 14],
-        "result_value" : [7, 14],
+        #"result_value" : [7, 14],
         "spend": [7, 14],
         "impressions": [7, 14],
+        "clicks": [7, 14],
     }
     
-    for col, windows in rolling_features.items():
+    for col, windows in ROLLING_FEATURES.items():
         if col in df.columns:
             for w in windows:
                 df[f"{col}_roll_{w}"] = (
                     df.groupby("campaign_id")[col]
                     .shift(1)
-                    .rolling(w, min_periods=3)
+                    .rolling(w, min_periods=(3, w // 2))
                     .mean()
                 )
     
     # ---------------------------------------
     # 4. Momentum / Percentage Change
     # ---------------------------------------
-    # if "ctr_link" in df.columns and "ctr_link_lag_1" in df.columns:
-    #     df["ctr_link_pct_change"] = (
-    #         (df["ctr_link"] - df["ctr_link_lag_1"]) /
-    #         df["ctr_link_lag_1"].replace({0: np.nan})
-    #     )
-
-    # if "spend" in df.columns and "spend_lag_1" in df.columns:
-    #     df["spend_pct_change"] = (
-    #         (df["spend"] - df["spend_lag_1"]) /
-    #         df["spend_lag_1"].replace({0: np.nan})
-    #     )
+    if {"ctr_link", "ctr_link_lag_1"}.issubset(df.columns):
+    #if "ctr_link" in df.columns and "ctr_link_lag_1" in df.columns:
+        df["ctr_link_pct_change"] = (
+            (df["ctr_link"] - df["ctr_link_lag_1"]) /
+            df["ctr_link_lag_1"].replace({0: np.nan})
+        )
+    
+    if {"spend", "spend_lag_1"}.issubset(df.columns):
+    #if "spend" in df.columns and "spend_lag_1" in df.columns:
+        df["spend_pct_change"] = (
+            (df["spend"] - df["spend_lag_1"]) /
+            df["spend_lag_1"].replace({0: np.nan})
+        )
 
     # ------------------------------------------
     # 5. RETARGETING POOL PROXY
@@ -106,6 +110,8 @@ def build_ctr_features(
         df["retargeting_pool"] = (
             df.groupby("campaign_id")["results_value"].cumsum()
         )
+    else:
+        df["retargeting_pool"] = np.nan
     
     # -------------------------------------------
     # 6. Time-Based Features
@@ -125,10 +131,14 @@ def build_ctr_features(
     if history_cols:
         df = df.dropna(subset=history_cols)
 
+    # Optional: strict history window
+    if min_history_days > 1:
+        counts = df.groupby("campaign_id")["date"].transform("count")
+        df = df[counts >= min_history_days]
+
     # ---------------------------------------------
     # 8. Final cleanup
     # ---------------------------------------------
     df = df.replace([np.inf, -np.inf], np.nan)
 
     return df
-                    
