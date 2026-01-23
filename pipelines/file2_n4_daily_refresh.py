@@ -57,10 +57,10 @@ def require_env(name: str) -> str:
 def run_daily_refresh(
         *,
         supermetrics_path: Path,
-        access_token: str,
-        ad_account_id: str,
-        date_since: str,
-        date_until: str,
+        # access_token: str,
+        # ad_account_id: str,
+        # date_since: str,
+        # date_until: str,
         model_path: str,
         min_history_days: int,
 ) -> None:
@@ -87,8 +87,18 @@ def run_daily_refresh(
 
     run_date = datetime.utcnow().strftime("%Y-%m-%d")
 
-    total_steps = 8
-    pbar = tqdm(total=total_steps, desc="Pipeline", unit="step")
+    #total_steps = 8
+
+    steps = [
+        "Load Supermetrics",
+        "Aggregate daily campaign",
+        "Build features",
+        "Load model",
+        "Predict",
+        "Apply rules",
+        "Write outputs",
+    ]
+    pbar = tqdm(total=len(steps), desc="Pipeline", unit="step")
 
     # -------------------------------------------------
     # 0. INGEST — Supermetrics (authoritative metrics)
@@ -185,7 +195,7 @@ def run_daily_refresh(
     # -------------------------------------------------
     # 4. FEATURE ENGINEERING
     # -------------------------------------------------
-    print("[4/8] Building CTR features...")
+    print("[4/8] Building Metric features...")  # not ctr centric, but all
     df_features = build_ctr_features(df_daily, min_history_days=min_history_days)
 
     if df_features.empty:
@@ -204,18 +214,22 @@ def run_daily_refresh(
     # -----------------------------------------------------
     # 6. PREDICT CTR
     # -----------------------------------------------------
-    print("[6/8] Predicting CTR...")
+    print("[6/8] Predicting metrics...")
     df_features["pred_ctr_link"] = predict_ctr(
         model,
         df_features,
         feature_cols=metadata["features"],
     )
 
+    pbar.update(1)
+
     # -------------------------------------------------------
     # 7. APPLY RULES
     # -------------------------------------------------------
     print("[7/8] Generating recommendations...")
     df_out = generate_signals(df_features)
+
+    pbar.update(1)
 
     # -------------------------------------------------------
     # 8. WRITE OUTPUTS
@@ -252,7 +266,7 @@ def run_daily_refresh(
 # CLI Entrypoint
 # =====================================================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Daily CTR Prediction Pipeline")
+    parser = argparse.ArgumentParser(description="Daily Metrics Prediction Pipeline")
 
     parser.add_argument(
         "--supermetrics-path",
@@ -266,21 +280,21 @@ if __name__ == "__main__":
     #parser.add_argument("--date-since", required=True, help="Start date (YYYY-MM-DD)")
     #parser.add_argument("--date-until", required=True, help="End date (YYYY-MM-DD)")
 
-    parser.add_argument(
-        "--date-since",
-        default=os.getenv("DATE_SINCE"),
-        help="Start date (YYYY-MM-DD). CLI > ENV.",
-    )
+    # parser.add_argument(
+    #     "--date-since",
+    #     default=os.getenv("DATE_SINCE"),
+    #     help="Start date (YYYY-MM-DD). CLI > ENV.",
+    # )
 
-    parser.add_argument(
-        "--date-until",
-        default=os.getenv("DATE_UNTIL", datetime.today().strftime("%Y-%m-%d")),
-        help="End date (YYYY-MM-DD). Defaults to today.",
-    )
+    # parser.add_argument(
+    #     "--date-until",
+    #     default=os.getenv("DATE_UNTIL", datetime.today().strftime("%Y-%m-%d")),
+    #     help="End date (YYYY-MM-DD). Defaults to today.",
+    # )
     
     parser.add_argument(
         "--model-path",
-        #default=DEFAULT_MODEL_PATH,
+        default=DEFAULT_MODEL_PATH,
         type=Path,
         help="Path prefix of trained model artifacts",
     )
@@ -304,10 +318,10 @@ if __name__ == "__main__":
         supermetrics_path=args.supermetrics_path,
         #access_token=args.access_token,
         #ad_account_id=args.ad_account_id,
-        access_token=access_token,
-        ad_account_id=ad_account_id,
-        date_since=args.date_since,
-        date_until=args.date_until,
+        # access_token=access_token,
+        # ad_account_id=ad_account_id,
+        # date_since=args.date_since,
+        # date_until=args.date_until,
         model_path=args.model_path,
         min_history_days=args.min_history_days,
     )
