@@ -16,22 +16,47 @@ import joblib
 import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+
+# ========================================================
+# SUPPORTED PREDICTIVE TARGETS
+# =======================================================
+SUPPORTED_TARGETS = {
+    "ctr_link",
+    "ctr_all",
+    "cpc_link",
+    "cpc_all",
+    "cpa",
+    "cpm",
+    "cost_per_1000_reach",
+}
+
 # ========================================================
 # 1. Train CTR model
 # ========================================================
-def train_ctr_model(
+def train_metric_model(
+#def train_ctr_model(
         df: pd.DataFrame,
-        target: str = "ctr_link",
+        *,
+        target: str,
         test_days: int = 14,
         random_seed: int = 42,
 ) -> Tuple[xgb.XGBRegressor, Dict[str, Any]]:
     """
-    Train XGBoost CTR model using time-aware split.
+    # Train XGBoost CTR model using time-aware split.
 
-    Returns:
-        model      : trained XGBRegressor
-        metadata   : dict with metrics, features, cutoff_date
+    # Returns:
+    #     model      : trained XGBRegressor
+    #     metadata   : dict with metrics, features, cutoff_date
+
+    
+    Train a time-aware regression model for ONE metric.
+
+    One target → one model → one artifact.
+
     """
+
+    if target not in SUPPORTED_TARGETS:
+        raise ValueError(f"Unsupported target: {target}")
 
     if df.empty:
         raise ValueError("Training DataFrame is empty.")
@@ -139,7 +164,7 @@ def train_ctr_model(
         reg_lambda=1.0,
         random_state=random_seed,
         objective="reg:squarederror",
-        eval_metrics="rmse",
+        #eval_metrics="rmse",
         tree_method="hist",
     )
 
@@ -254,7 +279,9 @@ def load_model(path: str) -> Tuple[xgb.XGBRegressor, Dict[str, Any]]:
 def predict_ctr(
         model: xgb.XGBRegressor,
         df: pd.DataFrame,
+        *,
         feature_cols: list[str] | None = None,
+        output_name: str,
 ) -> pd.Series:
     """
     Predict CTR for all rows in df.
@@ -276,4 +303,4 @@ def predict_ctr(
 
     preds = model.predict(X)
     
-    return pd.Series(preds, index=df.index, name="pred_ctr_link")
+    return pd.Series(preds, index=df.index, name=output_name)
