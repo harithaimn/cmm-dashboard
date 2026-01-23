@@ -131,13 +131,14 @@ def aggregate_daily_campaign(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # ---------------------------------
-    # 5. Recompute TRUE CTR (Source of Truth)
+    # 5. Recompute rate metrics (Source of Truth)
     # ----------------------------------
     # df_agg["ctr_link"] = (
     #     df_agg["clicks"] /
     #     df_agg["impressions"].replace({0: np.nan})
     # )
 
+    # CTRs
     if {"clicks", "impressions"}.issubset(df_agg.columns):
         df_agg["ctr_link"] = (
             df_agg["clicks"] /
@@ -145,7 +146,50 @@ def aggregate_daily_campaign(df: pd.DataFrame) -> pd.DataFrame:
         )
     else:
         df_agg["ctr_link"] = np.nan
+    
+    if {"clicks_all", "impressions"}.issubset(df_agg.columns):
+        df_agg["ctr_all"] = (
+            df_agg["clicks_all"] /
+            df_agg["impressions"].replace({0: np.nan})
+        )
+    else:
+        df_agg["ctr_all"] = np.nan
 
+    # CPCs  
+    if {"spend", "clicks"}.issubset(df_agg.columns):
+        df_agg["cpc_link"] = (
+            df_agg["spend"] /
+            df_agg["clicks"].replace({0: np.nan})
+        )
+    else:
+        df_agg["cpc_link"] = np.nan
+
+    if {"spend", "clicks_all"}.issubset(df_agg.columns):
+        df_agg["cpc_all"] = (
+            df_agg["spend"] /
+            df_agg["clicks_all"].replace({0: np.nan})
+        )
+    else:
+        df_agg["cpc_all"] = np.nan
+
+    # CPM
+    if {"spend", "impressions"}.issubset(df_agg.columns):
+        df_agg["cpm"] = (
+            df_agg["spend"] /
+            df_agg["impressions"].replace({0: np.nan})
+        ) * 1000
+    else:
+        df_agg["cpm"] = np.nan
+
+    # CPA
+    if {"spend", "actions"}.issubset(df_agg.columns):
+        df_agg["cpa"] = (
+            df_agg["spend"] /
+            df_agg["actions"].replace({0: np.nan})
+        )
+    else:
+        df_agg["cpa"] = np.nan
+        
     # -----------------------------------------------
     # 6. Recompute additional derived metrics (safe)
     # -----------------------------------------------
