@@ -24,7 +24,7 @@ from core.n2_3_merge import build_canonical_daily_df
 
 from core.n3_1_aggregation import aggregate_daily_campaign
 from core.n3_2_features import build_ctr_features
-from core.n3_3_model import train_ctr_model, save_model
+from core.n3_3_model import train_metric_model, save_model
 
 # ========================================================
 # MARK: STEP 11 — Predictions & Risk Flags (FINAL)
@@ -33,11 +33,28 @@ from core.n3_3_model import train_ctr_model, save_model
 # =======================================================
 # CONFIG
 # =======================================================
-DEFAULT_MODEL_PATH = "artifacts/models/ctr_link"
+#DEFAULT_MODEL_PATH = "artifacts/models/ctr_link"
 DEFAULT_MIN_HISTORY_DAYS = 7
 DEFAULT_TEST_DAYS = 14
-DEFAULT_TARGET = "ctr_link"
+#DEFAULT_TARGET = "ctr_link"
 RANDOM_SEED = 42
+
+# Metrics we train (ONE model per metric)
+TARGETS = [
+    "ctr_link",
+    "ctr_all",
+    "cpc_link",
+    "cpc_all",
+    "cpa",
+    "cpm",
+    "cost_per_1000_reach",
+]
+
+# Outputs
+OUTPUT_DIR = Path("data/training")
+OUTPUT_CANONICAL = OUTPUT_DIR / "canonical_daily.parquet"
+OUTPUT_FEATURES = OUTPUT_DIR / "features.parquet"
+MODEL_DIR = Path("artifacts/models")
 
 
 # ========================================================
@@ -55,22 +72,23 @@ def require_env(name: str) -> str:
 def run_training(
         *,
         supermetrics_path: Path,
-        access_token: str,
-        ad_account_id: str,
+        #access_token: str,
+        #ad_account_id: str,
         date_since: str,
         date_until: str,
-        model_path: Path,
+        #model_path: Path,
         min_history_days: int,
 ) -> None:
     """
-    End-to-end CTR model training pipeline.
+    End-to-end metric model training pipeline.
 
     Flow:
-    (ingest) Meta API
-    -> cleaning
+    # (ingest) Meta API
+    Supermetrics
+    #-> cleaning
     -> aggregation daily x campaign
     -> feature engineering
-    -> model training
+    -> model training (train one model per metric)
     -> save artifacts
 
     This pipeline:
@@ -82,8 +100,12 @@ def run_training(
     """
 
     print("\n==============================")
-    print("🚀 CTR TRAINING PIPELINE START")
+    print("🚀 METRIC TRAINING PIPELINE START")
     print("==============================")
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    #model_path.parent.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------
     # 0. INGEST — Supermetrics (authoritative metrics)
@@ -94,59 +116,63 @@ def run_training(
     if df_super.empty:
         raise RuntimeError("Supermetrics export is empty.")
 
+    """ from here i commented out Meta ingest and Merge. later i'll fix ingest and merging. """
+    # # -------------------------------------------------
+    # # 1. INGEST (Meta Graph API)
+    # # -------------------------------------------------
+    # print("[1/6] Fetching Meta data...")
+    # df_raw = fetch_meta_daily_fact_table(
+    #     access_token=access_token,
+    #     ad_account_id=ad_account_id,
+    #     date_since=date_since,
+    #     date_until=date_until,
+    # )
 
-    # -------------------------------------------------
-    # 1. INGEST (Meta Graph API)
-    # -------------------------------------------------
-    print("[1/6] Fetching Meta data...")
-    df_raw = fetch_meta_daily_fact_table(
-        access_token=access_token,
-        ad_account_id=ad_account_id,
-        date_since=date_since,
-        date_until=date_until,
-    )
-
-    if df_raw.empty:
-        raise RuntimeError("No data returned from Meta API.")
+    # if df_raw.empty:
+    #     raise RuntimeError("No data returned from Meta API.")
     
 
-    # -----------------------------------------------------
-    # 1.5 MERGE - Single Source of Truth
-    # -----------------------------------------------------
-    print("[1.5/6] Merging Supermetrics + Meta...")
-    df = build_canonical_daily_df(
-        supermetrics_df=df_super,
-        meta_df=df_raw,
-    )
+    # # -----------------------------------------------------
+    # # 1.5 MERGE - Single Source of Truth
+    # # -----------------------------------------------------
+    # print("[1.5/6] Merging Supermetrics + Meta...")
+    # df = build_canonical_daily_df(
+    #     supermetrics_df=df_super,
+    #     meta_df=df_raw,
+    # )
 
-    if df.empty:
-        raise RuntimeError("Merged canonical DataFrame is empty.")
+    # if df.empty:
+    #     raise RuntimeError("Merged canonical DataFrame is empty.")
     
-    # --------------------------------------------------
-    # 2. CLEANING / ONTOLOGY
-    # --------------------------------------------------
-    print(["[2/6] Cleaning campaign semantics..."])
+    # # --------------------------------------------------
+    # # 2. CLEANING / ONTOLOGY
+    # # --------------------------------------------------
+    # print(["[2/6] Cleaning campaign semantics..."])
 
-    if "campaign_name" in df.columns:
-        df["campaign_name_clean"] = df["campaign_name"].apply(clean_campaign_name)
-        df["objective_raw"] = df["campaign_name_clean"].apply(
-            extract_objective_dynamic
-        )
-        df["objective"] = df["objective_raw"].apply(normalize_objective)
+    # if "campaign_name" in df.columns:
+    #     df["campaign_name_clean"] = df["campaign_name"].apply(clean_campaign_name)
+    #     df["objective_raw"] = df["campaign_name_clean"].apply(
+    #         extract_objective_dynamic
+    #     )
+    #     df["objective"] = df["objective_raw"].apply(normalize_objective)
 
-    # --------------------------------------------------
+    # # --------------------------------------------------
     # 3. AGGREGATION (DAILY x CAMPAIGN)
     # --------------------------------------------------
     print(["3/6] Aggregating daily campaign data..."])
-    df_daily = aggregate_daily_campaign(df)
+    df_daily = aggregate_daily_campaign(df_super)
+    #df_daily = aggregate_daily_campaign(df)
 
     if df_daily.empty:
         raise RuntimeError("Aggregation resulted in empty DataFrame.")
+
+    df_daily.to_parquet(OUTPUT_CANONICAL, index=False)
     
     # --------------------------------------------------
     # 4. FEATURE ENGINEERING
     # --------------------------------------------------
-    print("[4/6] Building CTR features...")
+    #print("[4/6] Building CTR features...")
+    print("[4/6] Building features...")
     df_features = build_ctr_features(
         df_daily,
         min_history_days=min_history_days,
@@ -155,20 +181,44 @@ def run_training(
     if df_features.empty:
         raise RuntimeError("Feature engineering resulted in empty DataFrame.")
     
+    df_features.to_parquet(OUTPUT_FEATURES, index=False)
+    
     # ---------------------------------------------------
     # 5. MODEL TRAINING
     # ---------------------------------------------------
-    print("[5/6] Training CTR model...")
-    model, metadata = train_ctr_model(
-        df_features,
-        target=DEFAULT_TARGET,
-        test_days=DEFAULT_TEST_DAYS,
-        random_seed=RANDOM_SEED,
-        
+    print("[5/6] Training metric model...")
+
+    for target in TARGETS:
+        if target not in df_features.columns:
+            print(f"⚠️ Skipping {target}: column not found")
+            continue
+
+        print(f"\n🧠 Training model for: {target}")
+
+        model, metadata = train_metric_model(
+            df_features,
+            #target=DEFAULT_TARGET,
+            target=target,
+            test_days=DEFAULT_TEST_DAYS,
+            random_seed=RANDOM_SEED,
+            
+        )
+        # =============================================
+        # 6. SAVE ARTIFACTS
+        # ============================================
+        save_model(
+            model,
+            metadata,
+            MODEL_DIR / target,
         )
     
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-
+    print("\n==============================")
+    print("✅ TRAINING COMPLETE")
+    print("==============================")
+    print(f"📦 Models saved to: {MODEL_DIR.resolve()}")
+    print(f"🧠 Targets trained: {TARGETS}")    
+        #model_path.parent.mkdir(parents=True, exist_ok=True)
+    """
     # ---------------------------------------------------
     # 6. SAVE ARTIFACTS
     # ---------------------------------------------------
@@ -183,6 +233,7 @@ def run_training(
     print(f"📦 Model path: {model_path.resolve()}")
     print(f"📊 Metrics: {metadata['metrics']}")
     print(f"🧠 Features used: {len(metadata['features'])}")
+    """
 
 
 # ====================================================
@@ -190,7 +241,7 @@ def run_training(
 # ====================================================
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="CTR Model Training Pipeline")
+    parser = argparse.ArgumentParser(description="Metric Model Training Pipeline")
 
     parser.add_argument(
         "--supermetrics-path",
@@ -214,12 +265,12 @@ if __name__ == "__main__":
         help="End date (YYYY-MM-DD). Defaults to today.",
     )
     
-    parser.add_argument(
-        "--model-path",
-        type=Path,
-        default=DEFAULT_MODEL_PATH,
-        help="Path prefix to save model artifacts",
-    )
+    # parser.add_argument(
+    #     "--model-path",
+    #     type=Path,
+    #     default=DEFAULT_MODEL_PATH,
+    #     help="Path prefix to save model artifacts",
+    # )
     parser.add_argument(
         "--min-history-days",
         type=int,
@@ -235,8 +286,8 @@ if __name__ == "__main__":
 
     # --------- secrets from environment ----------
 
-    access_token = require_env("META_ACCESS_TOKEN")
-    ad_account_id = require_env("META_AD_ACCOUNT_ID")
+    # access_token = require_env("META_ACCESS_TOKEN")
+    # ad_account_id = require_env("META_AD_ACCOUNT_ID")
 
     #Path(args.model_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -244,12 +295,10 @@ if __name__ == "__main__":
         supermetrics_path=args.supermetrics_path,
         # access_token=args.access_token,
         # ad_account_id=args.ad_account_id,
-        access_token=access_token,
-        ad_account_id=ad_account_id,
+        # access_token=access_token,
+        # ad_account_id=ad_account_id,
         date_since=args.date_since,
         date_until=args.date_until,
-        model_path=args.model_path,
+        #model_path=args.model_path,
         min_history_days=args.min_history_days,
     )
-
-
