@@ -28,6 +28,11 @@ from core.n3_2_features import build_ctr_features
 from core.n3_3_model import load_model, predict_ctr
 from core.n3_4_rules import generate_signals
 
+from core.n3_5_llm import (
+    get_openai_client,
+    generate_llm_explanation,
+)
+
 # ===================================================
 # CONFIG
 # ===================================================
@@ -41,6 +46,13 @@ OUTPUT_PREDICTIONS = OUTPUT_DIR / "predictions.parquet"
 OUTPUT_ALERTS = OUTPUT_DIR / "alerts.parquet"
 
 META_CHECKPOINT = Path("data/raw/meta.parquet")
+
+# ===================================================
+# LLM CONFIG
+# ===================================================
+ENABLE_LLM = True
+LLM_MODEL = "gpt-4.1-mini"
+LLM_TEMPERATURE = 0.3
 
 # ===================================================
 # ENV HELPERS
@@ -59,8 +71,8 @@ def run_daily_refresh(
         supermetrics_path: Path,
         # access_token: str,
         # ad_account_id: str,
-        # date_since: str,
-        # date_until: str,
+        date_since: str,
+        date_until: str,
         model_path: str,
         min_history_days: int,
 ) -> None:
@@ -86,6 +98,17 @@ def run_daily_refresh(
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     run_date = datetime.utcnow().strftime("%Y-%m-%d")
+
+    client = None
+    llm_enabled = ENABLE_LLM
+
+    if llm_enabled:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            print("⚠️ No OpenAI API key found. Disabling LLM.")
+            llm_enabled = False
+        else:
+            client = get_openai_client(api_key)
 
     #total_steps = 8
 
@@ -207,19 +230,38 @@ def run_daily_refresh(
     # ----------------------------------------------------
     # 5. LOAD TRAINED MODEL
     # ----------------------------------------------------
-    print("[5/8] Loading trained model...")
-    model, metadata = load_model(model_path)
+    print("[5/8] Loading trained models...")
+
+    # model, metadata = load_model(model_path)
+    model_dir = Path(model_path)
+    if not model_dir.exists():
+        raise RuntimeError(f"Model directory not found: {model_dir}")
+
+    models = {}
+
+    for model_file in model_dir.glob("*.joblib"):
+        metric = model_file.stem
+        print(f"↪ Loading model for {metric}")
+        model, metadata = load_model(model_dir / metric)
+        models[metric] = (model, metadata)
+
+    if not models:
+        raise RuntimeError("No trained models found in model directory.")
+
     pbar.update(1)
 
     # -----------------------------------------------------
-    # 6. PREDICT CTR
+    # 6. PREDICT METRICS  (all , not just CTR)
     # -----------------------------------------------------
     print("[6/8] Predicting metrics...")
-    df_features["pred_ctr_link"] = predict_ctr(
-        model,
-        df_features,
-        feature_cols=metadata["features"],
-    )
+
+    for metric, (model, metadata) in models.items():
+        df_features[f"pred_{metric}"] = predict_ctr(
+            model=model,
+            df=df_features,
+            feature_cols=metadata["features"],
+            output_name=f"pred_{metric}",
+        )
 
     pbar.update(1)
 
@@ -232,9 +274,114 @@ def run_daily_refresh(
     pbar.update(1)
 
     # -------------------------------------------------------
+    # 7.5 LLM EXPLANATIONS (Human-readable layer)
+    # -------------------------------------------------------
+    if llm_enabled:
+        print("[7.5/8] Generating LLM explanations...")
+
+        # reasons = []
+        # recommendations = []
+        # summaries = []
+
+        llm_texts = []
+
+        for _, row in df_out.iterrows():
+            # Only explain rows with actual signals
+            if row.get("signal_count", 0) == 0:
+                # reasons.append("")
+                # recommendations.append("")
+                # summaries.append("")
+                llm_texts.append("")
+                continue
+            
+            payload = {
+                "campaign_id": row.get("campaign_id"),
+                "campaign_name": row.get("campaign_name"),
+                "date": str(row.get("date")),
+
+                # Actual performance
+                "metrics_actual": {
+                    k: row.get(k)
+                    for k in (
+                        "ctr_link", "ctr_all",
+                        "cpc_link", "cpc_all",
+                        "cpa", "cpm",
+                        "cost_per_1000_reach",
+                    )
+                    if k in row
+                },
+
+                # "ctr_link": row.get("ctr_link"),
+                # "ctr_all": row.get("ctr_all"),
+                # "cpc_link": row.get("cpc_link"),
+                # "cpc_all": row.get("cpc_all"),
+                # "cpa": row.get("cpa"),
+                # "cpm": row.get("cpm"),
+                # "cost_per_1000_reach": row.get("cost_per_1000_reach"),
+
+                # Model Predictions
+                "metrics_predicted": {
+                    k: row.get(f"pred_{k}")
+                    for k in (
+                        "ctr_link", "ctr_all",
+                        "cpc_link", "cpc_all",
+                        "cpa", "cpm",
+                        "cost_per_1000_reach",
+                    )
+                    if f"pred_{k}" in row
+                },
+
+                # "pred_ctr_link": row.get("pred_ctr_link"),
+                # "pred_ctr_all": row.get("pred_ctr_all"),
+                # "pred_cpc_link": row.get("pred_cpc_link"),
+                # "pred_cpc_all": row.get("pred_cpc_all"),
+                # "pred_cpa": row.get("pred_cpa"),
+                # "pred_cpm": row.get("pred_cpm"),
+                # "pred_cost_per_1000_reach": row.get("pred_cost_per_1000_reach"),
+
+                # Signals
+                # "signals": {
+                #     k: row[k]
+                #     for k in row.index
+                #     if k.endswith("_flag")
+                # }
+                "signals": [
+                    k.replace("_flag", "")
+                    for k in row.index
+                    if k.endswith("_flag") and row[k] == 1
+                ],
+            }
+
+            try:
+                explanation = generate_llm_explanation(
+                    client=client,
+                    payload=payload,
+                    model=LLM_MODEL,
+                    temperature=LLM_TEMPERATURE,
+                )
+
+                # reasons.append(llm_out["reason"])
+                # recommendations.append(llm_out["recommendation"])
+                # summaries.append(llm_out["summary"])
+            except Exception as e:
+                print(f" ⚠️ LLM failed for campaign {row.get('campaign_id')} / {row.get('campaign_name')}: {e}")
+                # reasons.append("")
+                # recommendations.append("")
+                # summaries.append("")
+                explanation = ""
+
+            llm_texts.append(explanation)
+        
+        df_out["llm_explanation"] = llm_texts
+        # df_out["llm_reason"] = reasons
+        # df_out["llm_recommendation"] = recommendations
+        # df_out["llm_summary"] = summaries
+
+
+    # -------------------------------------------------------
     # 8. WRITE OUTPUTS
     # -------------------------------------------------------
-    print(["8/8] Writing outputs..."])
+    print(["[8/8] Writing outputs..."])
 
     # Full predictions
     # full_path = OUTPUT_DIR / "daily_predictions_latest.csv"
@@ -247,9 +394,13 @@ def run_daily_refresh(
 
     df_out.to_parquet(OUTPUT_PREDICTIONS, index=False)
 
-    alerts = df_out[df_out["alert_msg"].notna() & (df_out["alert_msg"] != "")]
-    alerts.to_parquet(OUTPUT_ALERTS, index=False)
+    # alerts = df_out[df_out["alert_msg"].notna() & (df_out["alert_msg"] != "")]
+    # alerts.to_parquet(OUTPUT_ALERTS, index=False)
 
+    alerts = df_out[df_out["signal_count"] > 0]
+
+    alerts.to_parquet(OUTPUT_ALERTS, index=False)
+    
     pbar.update(1)
     pbar.close()
 
@@ -280,17 +431,17 @@ if __name__ == "__main__":
     #parser.add_argument("--date-since", required=True, help="Start date (YYYY-MM-DD)")
     #parser.add_argument("--date-until", required=True, help="End date (YYYY-MM-DD)")
 
-    # parser.add_argument(
-    #     "--date-since",
-    #     default=os.getenv("DATE_SINCE"),
-    #     help="Start date (YYYY-MM-DD). CLI > ENV.",
-    # )
+    parser.add_argument(
+        "--date-since",
+        default=os.getenv("DATE_SINCE"),
+        help="Start date (YYYY-MM-DD). CLI > ENV.",
+    )
 
-    # parser.add_argument(
-    #     "--date-until",
-    #     default=os.getenv("DATE_UNTIL", datetime.today().strftime("%Y-%m-%d")),
-    #     help="End date (YYYY-MM-DD). Defaults to today.",
-    # )
+    parser.add_argument(
+        "--date-until",
+        default=os.getenv("DATE_UNTIL", datetime.today().strftime("%Y-%m-%d")),
+        help="End date (YYYY-MM-DD). Defaults to today.",
+    )
     
     parser.add_argument(
         "--model-path",
@@ -320,8 +471,8 @@ if __name__ == "__main__":
         #ad_account_id=args.ad_account_id,
         # access_token=access_token,
         # ad_account_id=ad_account_id,
-        # date_since=args.date_since,
-        # date_until=args.date_until,
+        date_since=args.date_since,
+        date_until=args.date_until,
         model_path=args.model_path,
         min_history_days=args.min_history_days,
     )
