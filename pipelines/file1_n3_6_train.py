@@ -159,7 +159,7 @@ def run_training(
     # # --------------------------------------------------
     # 3. AGGREGATION (DAILY x CAMPAIGN)
     # --------------------------------------------------
-    print(["3/6] Aggregating daily campaign data..."])
+    print("[3/6] Aggregating daily campaign data...")
     df_daily = aggregate_daily_campaign(df_super)
     #df_daily = aggregate_daily_campaign(df)
 
