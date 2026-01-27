@@ -51,8 +51,11 @@ __pycache__/
 .ipynb_checkpoints/
 .env
 
-.streamlit/secret.toml
+# Ignore .streamlit/secrets.toml
+.streamlit/secrets.toml
 
+# Ignore model artifacts
+artifacts/
 
 # specific files i ignore
 streamlit/backup_streamlit_test.py
