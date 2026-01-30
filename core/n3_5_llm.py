@@ -11,7 +11,8 @@ from openai import OpenAI
 # ========================================================
 # CONSTANTS / CONTRACT
 # ========================================================
-LLM_OUTPUT_KEYS = {"reason", "recommendation", "summary"}
+# LLM_OUTPUT_KEYS = {"reason", "recommendation", "summary"}
+LLM_OUTPUT_KEYS = {"explanations", "recommendation", "summary"}
 
 SUPPROTED_METRICS = {
     "ctr_link",
@@ -160,6 +161,46 @@ def generate_llm_explanation(
 
     text = response.choices[0].message.content.strip()
 
+    # Basic section parsing (robust + simple)
+    sections = {
+        "explanation": "",
+        "recommendation": "",
+        "summary": "",
+    }
+
+    current = None
+    buffer = []
+
+    for line in text.splitlines():
+        line = line.strip()
+
+        if line.lower().startswith("what's happening"):
+            current = "explanation"
+            buffer = []
+            continue
+        elif line.lower().startswith("what to do"):
+            sections[current] = " ".join(buffer).strip()
+            current = "recommendation"
+            buffer = []
+            continue
+        elif line.lower().startswith("summary"):
+            sections[current] = " ".join(buffer).strip()
+            current = "summary"
+            buffer = []
+            continue
+
+        if current:
+            buffer.append(line)
+
+    if current and buffer:
+        sections[current] = " ".join(buffer).strip()
+
+    # Final safety
+    for k in LLM_OUTPUT_KEYS:
+        sections.setdefault(k, "")
+
+    return sections
+    """
     # Very light safety check
     if len(text) < 50:
         return (
@@ -172,6 +213,7 @@ def generate_llm_explanation(
         )
 
     return text
+    """
 
     # content = response.choices[0].message.content
 
