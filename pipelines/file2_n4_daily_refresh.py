@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from tqdm import tqdm
 
 import pandas as pd
@@ -20,8 +20,8 @@ from core.n1_1_cleaning import (
 )
 
 from core.n2_1_supermetrics_ingestion import load_supermetrics_export
-from core.n2_2_meta_ingestion import fetch_meta_daily_fact_table
-from core.n2_3_merge import build_canonical_daily_df
+# from core.n2_2_meta_ingestion import fetch_meta_daily_fact_table
+# from core.n2_3_merge import build_canonical_daily_df
 
 from core.n3_1_aggregation import aggregate_daily_campaign
 from core.n3_2_features import build_metric_features
@@ -36,7 +36,8 @@ from core.n3_5_llm import (
 # ===================================================
 # CONFIG
 # ===================================================
-DEFAULT_MODEL_PATH = Path("artifacts/models/ctr_link")
+#DEFAULT_MODEL_PATH = Path("artifacts/models/ctr_link")
+DEFAULT_MODEL_PATH = Path("artifacts/models")
 DEFAULT_MIN_HISTORY_DAYS = 7
 
 OUTPUT_DIR = Path("data/predictions")
@@ -97,7 +98,8 @@ def run_daily_refresh(
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    run_date = datetime.utcnow().strftime("%Y-%m-%d")
+    #run_date = datetime.utcnow().strftime("%Y-%m-%d")  # Depreciated
+    run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     client = None
     llm_enabled = ENABLE_LLM
@@ -279,7 +281,7 @@ def run_daily_refresh(
     if llm_enabled:
         print("[7.5/8] Generating LLM explanations...")
 
-        llm_client = get_openai_client(os.getenv("OPENAI_API_KEY"))
+        #llm_client = get_openai_client(os.getenv("OPENAI_API_KEY"))
 
         # reasons = []
         explanations = []
@@ -325,7 +327,8 @@ def run_daily_refresh(
 
             try:
                 text = generate_llm_explanation(
-                    client=llm_client,
+                    #client=llm_client,
+                    client=client,
                     payload=payload,
                 )
 
