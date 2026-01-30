@@ -119,6 +119,7 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
         return df.copy()
     
     df = df.copy()
+    signal_flags = []
 
     """
     # ----------------------------------------------
@@ -132,8 +133,6 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     # ----------------------------------------------
     # 2. Flags
     # ----------------------------------------------
-
-    signal_flags = []
 
     for metric, cfg in METRIC_RULES.items():
         pred_col = f"pred_{metric}"
@@ -175,26 +174,87 @@ def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     # GLOBAL PRIORITY SIGNALS
     # ===============================================
 
-    if signal_flags:
-        df["signal_count"] = df[signal_flags].sum(axis=1)
-    else:
-        df["signal_count"] = 0
+    # if signal_flags:
+    #     df["signal_count"] = df[signal_flags].sum(axis=1)
+    # else:
+    #     df["signal_count"] = 0
     
     severity_rank = {"critical": 3, "warning": 2, "normal": 1, "unknown": 0}
 
     severity_cols = [c for c in df.columns if c.endswith("_severity")]
 
-    if severity_cols:
-        df["max_severity"] = (
-            df[severity_cols]
-            .apply(lambda row: max(row.map(severity_rank)), axis=1)
-            .map({v: k for k, v in severity_rank.items()})
-        )
-    else:
-        df["max_severity"] = "normal"
+    df["signal_count"] = df[signal_flags].sum(axis=1) if signal_flags else 0
+
+    df["max_severity"] = (
+        df[severity_cols]
+        .apply(lambda row: max(row.map(severity_rank)), axis=1)
+        .map({v: k for k, v in severity_rank.items()})
+        if severity_cols else "normal"
+    )
+
+    """ Ubah dekat sini """
+    # ==============================================
+    # 3. Creative Fatigue (attention decay)
+    # ==============================================
+    df["creative_fatigue_flag"] = (
+        (df.get("ctr_link_ratio", 1) < 0.85) &
+        (df.get("cpc_link_ratio", 1) < 1.15) &
+        (df.get("spend_pct_change", 0).abs() < 0.10)
+    ).astype(int)
+    
+    df["creative_fatigue_confidence"] = (
+        (df.get("ctr_link_severity") == "critical").astype(int) +
+        (df.get("cpc_link_severity") == "critical").astype(int)
+    )
+
+    # ==============================================
+    # 4. Offer Testing Velocity (recovery speed)
+    # ==============================================
+    df["offer_recovery_event"] = (
+        (df.get("ctr_link_ratio", 0) > 1.0) &
+        (df.get("ctr_link_pct_change", 0) > 0) &
+        (df.get("spend_pct_change", 0).abs() < 0.15)
+    ).astype(int)
+
+    df["days_since_last_recovery"] = (
+        df.groupby("campaign_id")["offer_recovery_event"]
+        .cumsum()
+        .groupby(df["campaign_id"])
+        .cumcount()
+    )
+
+    df["offer_testing_velocity_flag"] = (
+        (df.get("ctr_link_ratio", 1) < 0.85) &
+        (df["days_since_last_recovery"] > 14)
+    ).astype(int)
+
+    # =================================================
+    # 5. Spend Distribution (misallocation)
+    # =================================================
+    df["spend_misalignment_flag"] = (
+        (df.get("spend_pct_change", 0) > 0.20) &
+        (df.get("ctr_link_ratio", 1) < 0.85) &
+        (df.get("cpa_ratio", 1) > 1.25)
+    ).astype(int)
+    
+    # =================================================
+    # 6. Retargetting Pool Health
+    # =================================================
+    df["retargeting_pool_ready"] = (
+        (df.get("retargeting_pool", 0) >= 2500) &
+        (df.get("ctr_link_ratio", 1) < 0.9) &
+        (df.get("cpa_ratio", 1) <= 1.1)
+    ).astype(int)
+
+    df["retargeting_pool_saturated"] = (
+        (df.get("retargeting_pool", 0) >= 2500) &
+        (df.get("ctr_link_ratio", 1) < 0.85) &
+        (df.get("cpa_ratio", 1) > 1.25)
+    ).astype(int)
 
     return df
-
+        
+    
     # # 2.1 CTR Drop Flag
     # # Rule:
     # # predicted CTR < 85% of recent baseline
