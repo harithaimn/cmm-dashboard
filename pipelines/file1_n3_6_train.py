@@ -23,7 +23,7 @@ from core.n2_2_meta_ingestion import fetch_meta_daily_fact_table
 from core.n2_3_merge import build_canonical_daily_df
 
 from core.n3_1_aggregation import aggregate_daily_campaign
-from core.n3_2_features import build_ctr_features
+from core.n3_2_features import build_metric_features
 from core.n3_3_model import train_metric_model, save_model
 
 # ========================================================
@@ -173,7 +173,7 @@ def run_training(
     # --------------------------------------------------
     #print("[4/6] Building CTR features...")
     print("[4/6] Building features...")
-    df_features = build_ctr_features(
+    df_features = build_metric_features(
         df_daily,
         min_history_days=min_history_days,
     )
