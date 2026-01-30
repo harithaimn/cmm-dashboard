@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
+#import argparse
 import os
 from pathlib import Path
 from datetime import datetime
@@ -19,12 +19,16 @@ from core.n1_1_cleaning import (
 )
 
 from core.n2_1_supermetrics_ingestion import load_supermetrics_export
-from core.n2_2_meta_ingestion import fetch_meta_daily_fact_table
-from core.n2_3_merge import build_canonical_daily_df
+# from core.n2_2_meta_ingestion import fetch_meta_daily_fact_table
+# from core.n2_3_merge import build_canonical_daily_df
 
 from core.n3_1_aggregation import aggregate_daily_campaign
 from core.n3_2_features import build_metric_features
 from core.n3_3_model import train_metric_model, save_model
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ========================================================
 # MARK: STEP 11 — Predictions & Risk Flags (FINAL)
@@ -34,7 +38,13 @@ from core.n3_3_model import train_metric_model, save_model
 # CONFIG
 # =======================================================
 #DEFAULT_MODEL_PATH = "artifacts/models/ctr_link"
-DEFAULT_MIN_HISTORY_DAYS = 7
+SUPER_METRICS_PATH = Path(os.getenv("SUPER_METRICS_PATH"))
+DATE_SINCE = os.getenv("DATE_SINCE")
+#DATE_UNTIL = os.getenv("DATE_UNTIL")
+DATE_UNTIL = datetime.today().strftime("%Y-%m-%d")
+
+#DEFAULT_MIN_HISTORY_DAYS = 7
+MIN_HISTORY_DAYS = int(os.getenv("MIN_HISTORY_DAYS", "7"))
 DEFAULT_TEST_DAYS = 14
 #DEFAULT_TARGET = "ctr_link"
 RANDOM_SEED = 42
@@ -66,6 +76,8 @@ def require_env(name: str) -> str:
         raise RuntimeError(f"Missing required environment variable: {name}")
     return value
 
+if not SUPER_METRICS_PATH or not DATE_SINCE:
+    raise RuntimeError("Missing required env vars: SUPER_METRICS_PATH or DATE_SINCE")
 # ========================================================
 # MAIN TRAINING PIPELINE
 # ========================================================
@@ -241,64 +253,69 @@ def run_training(
 # ====================================================
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Metric Model Training Pipeline")
+    # parser = argparse.ArgumentParser(description="Metric Model Training Pipeline")
 
-    parser.add_argument(
-        "--supermetrics-path",
-        type=Path,
-        required=True,
-        help="Path to Supermetrics export CSV",
-    )
+    # parser.add_argument(
+    #     "--supermetrics-path",
+    #     type=Path,
+    #     required=True,
+    #     help="Path to Supermetrics export CSV",
+    # )
 
-    # parser.add_argument("--access-token", required=True, help="Meta API access token")
-    # parser.add_argument("--ad-account-id", required=True, help="Meta Ad Account ID")
-    #parser.add_argument("--date-since", required=True, help="Start date (YYYY-MM-DD)")
-    parser.add_argument(
-        "--date-since",
-        default=os.getenv("DATE_SINCE"),
-        help="Start date (YYYY-MM-DD). Can be set via env.",
-    )
-    
-    parser.add_argument(
-        "--date-until",
-        default=os.getenv("DATE_UNTIL", datetime.today().strftime("%Y-%m-%d")),
-        help="End date (YYYY-MM-DD). Defaults to today.",
-    )
+    # # parser.add_argument("--access-token", required=True, help="Meta API access token")
+    # # parser.add_argument("--ad-account-id", required=True, help="Meta Ad Account ID")
+    # #parser.add_argument("--date-since", required=True, help="Start date (YYYY-MM-DD)")
+    # parser.add_argument(
+    #     "--date-since",
+    #     default=os.getenv("DATE_SINCE"),
+    #     help="Start date (YYYY-MM-DD). Can be set via env.",
+    # )
     
     # parser.add_argument(
-    #     "--model-path",
-    #     type=Path,
-    #     default=DEFAULT_MODEL_PATH,
-    #     help="Path prefix to save model artifacts",
+    #     "--date-until",
+    #     default=os.getenv("DATE_UNTIL", datetime.today().strftime("%Y-%m-%d")),
+    #     help="End date (YYYY-MM-DD). Defaults to today.",
     # )
-    parser.add_argument(
-        "--min-history-days",
-        type=int,
-        default=DEFAULT_MIN_HISTORY_DAYS,
-        help="Minimum history days to use for feature engineering",
-    )
+    
+    # # parser.add_argument(
+    # #     "--model-path",
+    # #     type=Path,
+    # #     default=DEFAULT_MODEL_PATH,
+    # #     help="Path prefix to save model artifacts",
+    # # )
+    # parser.add_argument(
+    #     "--min-history-days",
+    #     type=int,
+    #     #default=DEFAULT_MIN_HISTORY_DAYS,
+    #     default=MIN_HISTORY_DAYS,
+    #     help="Minimum history days to use for feature engineering",
+    # )
 
-    args = parser.parse_args()
+    # args = parser.parse_args()
 
-    if not args.date_since:
-        raise RuntimeError("date-since must be provided via CLI or DATE_SINCE env var")
+    # if not args.date_since:
+    #     raise RuntimeError("date-since must be provided via CLI or DATE_SINCE env var")
 
 
     # --------- secrets from environment ----------
-
+    """ for now, unused since i am using supermetrics ingestion only """
     # access_token = require_env("META_ACCESS_TOKEN")
     # ad_account_id = require_env("META_AD_ACCOUNT_ID")
 
     #Path(args.model_path).parent.mkdir(parents=True, exist_ok=True)
 
     run_training(
-        supermetrics_path=args.supermetrics_path,
+        #supermetrics_path=args.supermetrics_path,
+        supermetrics_path=SUPER_METRICS_PATH,
+        date_since=DATE_SINCE,
+        date_until=DATE_UNTIL,
+        min_history_days=MIN_HISTORY_DAYS,
         # access_token=args.access_token,
         # ad_account_id=args.ad_account_id,
         # access_token=access_token,
         # ad_account_id=ad_account_id,
-        date_since=args.date_since,
-        date_until=args.date_until,
+        #date_since=args.date_since,
+        #date_until=args.date_until,
         #model_path=args.model_path,
-        min_history_days=args.min_history_days,
+        #min_history_days=args.min_history_days,
     )

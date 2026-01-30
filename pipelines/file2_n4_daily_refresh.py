@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
+#import argparse
 import os
 from pathlib import Path
 from datetime import datetime, timezone
@@ -33,12 +33,24 @@ from core.n3_5_llm import (
     generate_llm_explanation,
 )
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # ===================================================
 # CONFIG
 # ===================================================
 #DEFAULT_MODEL_PATH = Path("artifacts/models/ctr_link")
-DEFAULT_MODEL_PATH = Path("artifacts/models")
-DEFAULT_MIN_HISTORY_DAYS = 7
+#DEFAULT_MODEL_PATH = Path("artifacts/models")
+#DEFAULT_MIN_HISTORY_DAYS = 7
+
+SUPER_METRICS_PATH = Path(os.getenv("SUPER_METRICS_PATH"))
+DATE_SINCE = os.getenv("DATE_SINCE")
+#DATE_UNTIL = os.getenv("DATE_UNTIL")
+DATE_UNTIL = datetime.today().strftime("%Y-%m-%d")
+
+MODEL_PATH = Path(os.getenv("MODEL_PATH", "artifacts/models"))
+MIN_HISTORY_DAYS = int(os.getenv("MIN_HISTORY_DAYS", 7))
 
 OUTPUT_DIR = Path("data/predictions")
 OUTPUT_CANONICAL = OUTPUT_DIR / "canonical_daily.parquet"
@@ -63,6 +75,9 @@ def require_env(name: str) -> str:
     if not value:
         raise RuntimeError(f"Missing required environment variable: {name}")
     return value
+
+if not SUPER_METRICS_PATH or not DATE_SINCE:
+    raise RuntimeError("Missing required env vars for daily refresh")
 
 # ===================================================
 # DAILY REFRESH PIPELINE
@@ -473,62 +488,70 @@ def run_daily_refresh(
 # CLI Entrypoint
 # =====================================================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Daily Metrics Prediction Pipeline")
+    # parser = argparse.ArgumentParser(description="Daily Metrics Prediction Pipeline")
 
-    parser.add_argument(
-        "--supermetrics-path",
-        type=Path,
-        required=True,
-        help="Path to Supermetrics export CSV",
-    )
+    # parser.add_argument(
+    #     "--supermetrics-path",
+    #     type=Path,
+    #     required=True,
+    #     help="Path to Supermetrics export CSV",
+    # )
     
-    #parser.add_argument("--access-token", required=True, help="Meta API access token")
-    #parser.add_argument("--ad-account-id", required=True, help="Meta Ad Account ID")
-    #parser.add_argument("--date-since", required=True, help="Start date (YYYY-MM-DD)")
-    #parser.add_argument("--date-until", required=True, help="End date (YYYY-MM-DD)")
+    # #parser.add_argument("--access-token", required=True, help="Meta API access token")
+    # #parser.add_argument("--ad-account-id", required=True, help="Meta Ad Account ID")
+    # #parser.add_argument("--date-since", required=True, help="Start date (YYYY-MM-DD)")
+    # #parser.add_argument("--date-until", required=True, help="End date (YYYY-MM-DD)")
 
-    parser.add_argument(
-        "--date-since",
-        default=os.getenv("DATE_SINCE"),
-        help="Start date (YYYY-MM-DD). CLI > ENV.",
-    )
+    # parser.add_argument(
+    #     "--date-since",
+    #     default=os.getenv("DATE_SINCE"),
+    #     help="Start date (YYYY-MM-DD). CLI > ENV.",
+    # )
 
-    parser.add_argument(
-        "--date-until",
-        default=os.getenv("DATE_UNTIL", datetime.today().strftime("%Y-%m-%d")),
-        help="End date (YYYY-MM-DD). Defaults to today.",
-    )
+    # parser.add_argument(
+    #     "--date-until",
+    #     default=os.getenv("DATE_UNTIL", datetime.today().strftime("%Y-%m-%d")),
+    #     help="End date (YYYY-MM-DD). Defaults to today.",
+    # )
     
-    parser.add_argument(
-        "--model-path",
-        default=DEFAULT_MODEL_PATH,
-        type=Path,
-        help="Path prefix of trained model artifacts",
-    )
+    # parser.add_argument(
+    #     "--model-path",
+    #     #default=DEFAULT_MODEL_PATH,
+    #     default=MODEL_PATH,
+    #     type=Path,
+    #     help="Path prefix of trained model artifacts",
+    # )
 
-    parser.add_argument(
-        "--min-history-days",
-        type=int,
-        default=DEFAULT_MIN_HISTORY_DAYS,
-    )
+    # parser.add_argument(
+    #     "--min-history-days",
+    #     type=int,
+    #     #default=DEFAULT_MIN_HISTORY_DAYS,
+    #     default=MIN_HISTORY_DAYS,
+    # )
 
-    args = parser.parse_args()
+    # args = parser.parse_args()
 
-    if not args.date_since:
-        raise RuntimeError("date-since must be provided via CLI or DATE_SINCE env var")
+    # if not args.date_since:
+    #     raise RuntimeError("date-since must be provided via CLI or DATE_SINCE env var")
     
     # Secrets
-    access_token = require_env("META_ACCESS_TOKEN")
-    ad_account_id = require_env("META_AD_ACCOUNT_ID")
+    """ for now, unused since i am using supermetrics ingestion only. """
+    # access_token = require_env("META_ACCESS_TOKEN")
+    # ad_account_id = require_env("META_AD_ACCOUNT_ID")
 
     run_daily_refresh(
-        supermetrics_path=args.supermetrics_path,
+        #supermetrics_path=args.supermetrics_path,
+        supermetrics_path=SUPER_METRICS_PATH,
+        date_since=DATE_SINCE,
+        date_until=DATE_UNTIL,
+        model_path=MODEL_PATH,
+        min_history_days=MIN_HISTORY_DAYS,
         #access_token=args.access_token,
         #ad_account_id=args.ad_account_id,
         # access_token=access_token,
         # ad_account_id=ad_account_id,
-        date_since=args.date_since,
-        date_until=args.date_until,
-        model_path=args.model_path,
-        min_history_days=args.min_history_days,
+        #date_since=args.date_since,
+        #date_until=args.date_until,
+        #model_path=args.model_path,
+        #min_history_days=args.min_history_days,
     )
