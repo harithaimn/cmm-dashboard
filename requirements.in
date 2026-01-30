@@ -9,3 +9,6 @@ openai
 # openpyxl
 # duckdb
 # plotly
+# matplotlib
+
+python-dotenv==1.2.1
