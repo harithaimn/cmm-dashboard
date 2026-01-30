@@ -24,7 +24,7 @@ from core.n2_2_meta_ingestion import fetch_meta_daily_fact_table
 from core.n2_3_merge import build_canonical_daily_df
 
 from core.n3_1_aggregation import aggregate_daily_campaign
-from core.n3_2_features import build_ctr_features
+from core.n3_2_features import build_metric_features
 from core.n3_3_model import load_model, predict_ctr
 from core.n3_4_rules import generate_signals
 
@@ -48,11 +48,11 @@ OUTPUT_ALERTS = OUTPUT_DIR / "alerts.parquet"
 META_CHECKPOINT = Path("data/raw/meta.parquet")
 
 # ===================================================
-# LLM CONFIG
+# LLM CONFIG (ENV-DRIVEN)
 # ===================================================
-ENABLE_LLM = True
-LLM_MODEL = "gpt-4.1-mini"
-LLM_TEMPERATURE = 0.3
+ENABLE_LLM = os.getenv("ENABLE_LLM", "true").lower() == "true"
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4.1-mini")
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.3"))
 
 # ===================================================
 # ENV HELPERS
@@ -219,7 +219,7 @@ def run_daily_refresh(
     # 4. FEATURE ENGINEERING
     # -------------------------------------------------
     print("[4/8] Building Metric features...")  # not ctr centric, but all
-    df_features = build_ctr_features(df_daily, min_history_days=min_history_days)
+    df_features = build_metric_features(df_daily, min_history_days=min_history_days)
 
     if df_features.empty:
         raise RuntimeError("Feature engineering resulted in empty DataFrame.")
@@ -279,37 +279,84 @@ def run_daily_refresh(
     if llm_enabled:
         print("[7.5/8] Generating LLM explanations...")
 
-        # reasons = []
-        # recommendations = []
-        # summaries = []
+        llm_client = get_openai_client(os.getenv("OPENAI_API_KEY"))
 
-        llm_texts = []
+        # reasons = []
+        explanations = []
+        recommendations = []
+        summaries = []
+
+        # llm_texts = []
 
         for _, row in df_out.iterrows():
             # Only explain rows with actual signals
             if row.get("signal_count", 0) == 0:
                 # reasons.append("")
-                # recommendations.append("")
-                # summaries.append("")
-                llm_texts.append("")
+                explanations.append("")
+                recommendations.append("")
+                summaries.append("Performance is stable.")
+                #llm_texts.append("")
                 continue
             
             payload = {
                 "campaign_id": row.get("campaign_id"),
                 "campaign_name": row.get("campaign_name"),
                 "date": str(row.get("date")),
-
-                # Actual performance
-                "metrics_actual": {
-                    k: row.get(k)
-                    for k in (
-                        "ctr_link", "ctr_all",
-                        "cpc_link", "cpc_all",
-                        "cpa", "cpm",
+                "overall_severity": row["max_severity"],
+                "signals": {
+                    metric: {
+                        "severity": row[f"{metric}_severity"],
+                        "ratio": round(row[f"{metric}_ratio"], 2),
+                        "actual": round(row[metric], 4),
+                        "predicted": round(row[f"pred_{metric}"], 4),
+                    }
+                    for metric in [
+                        "ctr_link",
+                        "ctr_all",
+                        "cpc_link",
+                        "cpc_all",
+                        "cpa",
+                        "cpm",
                         "cost_per_1000_reach",
-                    )
-                    if k in row
-                },
+                    ]
+                    if f"{metric}_flag" in row and row[f"{metric}_flag"] == 1
+                }
+            }
+
+            try:
+                text = generate_llm_explanation(
+                    client=llm_client,
+                    payload=payload,
+                )
+
+                explanations.append(text["explanation"])
+                recommendations.append(text["recommendation"])
+                summaries.append(text["summary"])
+
+            except Exception as e:
+                print(f"LLM failed to generate explanation for {row['campaign_name']}.")
+                print(e)
+                explanations.append("")
+                recommendations.append("")
+                summaries.append("LLM error.")
+            
+        df_out["llm_explanation"] = explanations
+        df_out["llm_recommendation"] = recommendations
+        df_out["llm_summary"] = summaries
+
+                # """
+                # # Actual performance
+                # "metrics_actual": {
+                #     k: row.get(k)
+                #     for k in (
+                #         "ctr_link", "ctr_all",
+                #         "cpc_link", "cpc_all",
+                #         "cpa", "cpm",
+                #         "cost_per_1000_reach",
+                #     )
+                #     if k in row
+                # },
+                # """
 
                 # "ctr_link": row.get("ctr_link"),
                 # "ctr_all": row.get("ctr_all"),
@@ -319,17 +366,19 @@ def run_daily_refresh(
                 # "cpm": row.get("cpm"),
                 # "cost_per_1000_reach": row.get("cost_per_1000_reach"),
 
-                # Model Predictions
-                "metrics_predicted": {
-                    k: row.get(f"pred_{k}")
-                    for k in (
-                        "ctr_link", "ctr_all",
-                        "cpc_link", "cpc_all",
-                        "cpa", "cpm",
-                        "cost_per_1000_reach",
-                    )
-                    if f"pred_{k}" in row
-                },
+                # """
+                # # Model Predictions
+                # "metrics_predicted": {
+                #     k: row.get(f"pred_{k}")
+                #     for k in (
+                #         "ctr_link", "ctr_all",
+                #         "cpc_link", "cpc_all",
+                #         "cpa", "cpm",
+                #         "cost_per_1000_reach",
+                #     )
+                #     if f"pred_{k}" in row
+                # },
+                # """
 
                 # "pred_ctr_link": row.get("pred_ctr_link"),
                 # "pred_ctr_all": row.get("pred_ctr_all"),
@@ -345,34 +394,38 @@ def run_daily_refresh(
                 #     for k in row.index
                 #     if k.endswith("_flag")
                 # }
-                "signals": [
-                    k.replace("_flag", "")
-                    for k in row.index
-                    if k.endswith("_flag") and row[k] == 1
-                ],
-            }
+            #     """
+            #     "signals": [
+            #         k.replace("_flag", "")
+            #         for k in row.index
+            #         if k.endswith("_flag") and row[k] == 1
+            #     ],
+            # }
+            # """
 
-            try:
-                explanation = generate_llm_explanation(
-                    client=client,
-                    payload=payload,
-                    model=LLM_MODEL,
-                    temperature=LLM_TEMPERATURE,
-                )
+        #     """
+        #     try:
+        #         explanation = generate_llm_explanation(
+        #             client=client,
+        #             payload=payload,
+        #             model=LLM_MODEL,
+        #             temperature=LLM_TEMPERATURE,
+        #         )
 
-                # reasons.append(llm_out["reason"])
-                # recommendations.append(llm_out["recommendation"])
-                # summaries.append(llm_out["summary"])
-            except Exception as e:
-                print(f" ⚠️ LLM failed for campaign {row.get('campaign_id')} / {row.get('campaign_name')}: {e}")
-                # reasons.append("")
-                # recommendations.append("")
-                # summaries.append("")
-                explanation = ""
+        #         # reasons.append(llm_out["reason"])
+        #         # recommendations.append(llm_out["recommendation"])
+        #         # summaries.append(llm_out["summary"])
+        #     except Exception as e:
+        #         print(f" ⚠️ LLM failed for campaign {row.get('campaign_id')} / {row.get('campaign_name')}: {e}")
+        #         # reasons.append("")
+        #         # recommendations.append("")
+        #         # summaries.append("")
+        #         explanation = ""
+        #     """
 
-            llm_texts.append(explanation)
+        #     """ llm_texts.append(explanation) """
         
-        df_out["llm_explanation"] = llm_texts
+        # """ df_out["llm_explanation"] = llm_texts """
         # df_out["llm_reason"] = reasons
         # df_out["llm_recommendation"] = recommendations
         # df_out["llm_summary"] = summaries
