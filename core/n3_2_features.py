@@ -148,7 +148,8 @@ def build_metric_features(     # function name is build_ctr_features just becaus
     if "actions" in df.columns:
         df["retargeting_pool"] = (
             df.groupby("campaign_id")["actions"]
-                .apply(lambda x: x.fillna(0).cumsum())
+                #.apply(lambda x: x.fillna(0).cumsum())
+                .transform(lambda x: x.fillna(0).cumsum())
         )
     else:
         df["retargeting_pool"] = np.nan
