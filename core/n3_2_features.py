@@ -24,7 +24,7 @@ BASE_METRICS = [
     "cpc_all",
 ]
 
-def build_ctr_features(     # function name is build_ctr_features just because i wanted to streamline with other files. in reality, it should be named like build_metric_features
+def build_metric_features(     # function name is build_ctr_features just because i wanted to streamline with other files. in reality, it should be named like build_metric_features
         df: pd.DataFrame,
         min_history_days: int = 7,
 ) -> pd.DataFrame:
@@ -147,7 +147,8 @@ def build_ctr_features(     # function name is build_ctr_features just because i
 
     if "actions" in df.columns:
         df["retargeting_pool"] = (
-            df.groupby("campaign_id")["actions"].cumsum()
+            df.groupby("campaign_id")["actions"]
+                .apply(lambda x: x.fillna(0).cumsum())
         )
     else:
         df["retargeting_pool"] = np.nan
